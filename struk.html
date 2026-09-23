@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Struk</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  @media print {
+    body * { visibility: hidden; }
+    #receipt, #receipt * { visibility: visible; }
+    #receipt { position: absolute; top: 0; left: 0; width: 100%; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body class="bg-gray-100 min-h-screen py-6" x-data="strukApp()" x-init="init()">
+
+<div id="receipt" class="bg-white mx-auto max-w-xs p-5 shadow rounded-lg text-sm font-mono">
+  <div class="text-center mb-3">
+    <img x-show="settings.logo_url" :src="settings.logo_url" class="h-12 mx-auto mb-1 object-contain">
+    <p class="font-bold text-base" x-text="settings.store_name || 'Toko'"></p>
+    <p x-text="settings.address"></p>
+    <p x-text="settings.phone"></p>
+    <p class="mt-1" x-text="settings.receipt_header"></p>
+  </div>
+  <div class="border-t border-dashed my-2"></div>
+  <p x-text="tanggal"></p>
+  <p x-text="'Kasir: ' + (trx.cashier_name || '-')"></p>
+  <div class="border-t border-dashed my-2"></div>
+
+  <template x-for="item in items" :key="item.id">
+    <div class="flex justify-between mb-1">
+      <div>
+        <p x-text="item.name"></p>
+        <p class="text-xs text-gray-500" x-text="item.qty + ' x ' + formatRupiah(item.price_at_transaction)"></p>
+      </div>
+      <p x-text="formatRupiah(item.qty * item.price_at_transaction)"></p>
+    </div>
+  </template>
+
+  <div class="border-t border-dashed my-2"></div>
+  <div class="flex justify-between font-bold text-base">
+    <span>Total</span>
+    <span x-text="formatRupiah(trx.total)"></span>
+  </div>
+  <div class="flex justify-between">
+    <span x-text="trx.payment_method"></span>
+    <span x-text="formatRupiah(trx.cash_received)"></span>
+  </div>
+  <div class="flex justify-between" x-show="trx.payment_method === 'Tunai'">
+    <span>Kembali</span>
+    <span x-text="formatRupiah(trx.change)"></span>
+  </div>
+  <div class="border-t border-dashed my-2"></div>
+  <p class="text-center" x-text="settings.receipt_footer"></p>
+</div>
+
+<div class="max-w-xs mx-auto mt-4 no-print">
+  <button onclick="window.print()" class="w-full bg-blue-600 text-white py-2 rounded-lg font-semibold">🖨️ Cetak Struk</button>
+</div>
+
+<script>
+function strukApp() {
+  return {
+    trx: {},
+    items: [],
+    settings: {},
+    tanggal: "",
+    formatRupiah,
+
+    async init() {
+      const id = new URLSearchParams(window.location.search).get("id");
+      if (!id) return;
+
+      const { data: trx } = await db.from("transactions").select("*").eq("id", id).single();
+      this.trx = trx || {};
+      this.tanggal = trx ? new Date(trx.created_at).toLocaleString("id-ID") : "";
+
+      const { data: items } = await db
+        .from("transaction_items")
+        .select("*, products(name)")
+        .eq("transaction_id", id);
+      this.items = (items || []).map(i => ({ ...i, name: i.products?.name || "Produk" }));
+
+      const { data: settings } = await db.from("store_settings").select("*").limit(1).single();
+      this.settings = settings || {};
+    }
+  }
+}
+</script>
+</body>
+</html>

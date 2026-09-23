@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin - Kasir UMKM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen" x-data="adminApp()" x-init="init()" x-cloak>
+
+<header class="bg-white shadow px-4 py-3 flex justify-between items-center sticky top-0 z-10">
+  <h1 class="font-bold text-lg">⚙️ Admin</h1>
+  <div class="flex items-center gap-4">
+    <a href="kasir.html" class="text-sm text-blue-600 hover:underline">Ke Halaman Kasir</a>
+    <button @click="logoutNow()" class="text-sm text-red-600 hover:underline">Keluar</button>
+  </div>
+</header>
+
+<div class="max-w-5xl mx-auto p-4">
+  <!-- Tabs -->
+  <div class="flex gap-2 mb-4">
+    <button @click="tab='menu'" :class="tab==='menu' ? 'bg-blue-600 text-white' : 'bg-white border'" class="px-4 py-2 rounded-lg text-sm font-medium">Kelola Menu</button>
+    <button @click="tab='pengaturan'" :class="tab==='pengaturan' ? 'bg-blue-600 text-white' : 'bg-white border'" class="px-4 py-2 rounded-lg text-sm font-medium">Pengaturan Toko & Struk</button>
+    <button @click="tab='laporan'" :class="tab==='laporan' ? 'bg-blue-600 text-white' : 'bg-white border'" class="px-4 py-2 rounded-lg text-sm font-medium">Laporan Penjualan</button>
+  </div>
+
+  <!-- TAB: Kelola Menu -->
+  <div x-show="tab==='menu'" class="bg-white rounded-xl shadow p-4">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="font-semibold">Daftar Produk / Menu</h2>
+      <button @click="openProductForm()" class="bg-blue-600 text-white text-sm px-3 py-2 rounded-lg">+ Tambah Produk</button>
+    </div>
+    <table class="w-full text-sm">
+      <thead><tr class="text-left text-gray-500 border-b">
+        <th class="py-2">Nama</th><th>Kategori</th><th>Harga</th><th>Stok</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody>
+        <template x-for="p in products" :key="p.id">
+          <tr class="border-b">
+            <td class="py-2" x-text="p.name"></td>
+            <td x-text="p.category"></td>
+            <td x-text="formatRupiah(p.price)"></td>
+            <td x-text="p.stock ?? '-'"></td>
+            <td>
+              <span :class="p.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'" class="px-2 py-1 rounded-full text-xs" x-text="p.is_active ? 'Aktif' : 'Nonaktif'"></span>
+            </td>
+            <td class="text-right space-x-2 py-2">
+              <button @click="openProductForm(p)" class="text-blue-600 text-xs">Edit</button>
+              <button @click="deleteProduct(p.id)" class="text-red-600 text-xs">Hapus</button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- TAB: Pengaturan -->
+  <div x-show="tab==='pengaturan'" class="bg-white rounded-xl shadow p-4 max-w-lg">
+    <h2 class="font-semibold mb-3">Pengaturan Toko & Struk</h2>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-sm font-medium mb-1">Nama Toko</label>
+        <input x-model="settings.store_name" class="w-full border rounded-lg px-3 py-2">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Alamat</label>
+        <input x-model="settings.address" class="w-full border rounded-lg px-3 py-2">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">No. Telepon</label>
+        <input x-model="settings.phone" class="w-full border rounded-lg px-3 py-2">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">URL Logo (opsional)</label>
+        <input x-model="settings.logo_url" placeholder="https://..." class="w-full border rounded-lg px-3 py-2">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Header Struk</label>
+        <input x-model="settings.receipt_header" class="w-full border rounded-lg px-3 py-2">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Footer Struk</label>
+        <input x-model="settings.receipt_footer" class="w-full border rounded-lg px-3 py-2">
+      </div>
+      <button @click="saveSettings()" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium">Simpan Pengaturan</button>
+    </div>
+  </div>
+
+  <!-- TAB: Laporan -->
+  <div x-show="tab==='laporan'" class="bg-white rounded-xl shadow p-4">
+    <h2 class="font-semibold mb-3">Laporan Penjualan</h2>
+    <div class="flex flex-wrap gap-3 items-end mb-4">
+      <div>
+        <label class="block text-sm font-medium mb-1">Dari Tanggal</label>
+        <input type="date" x-model="dateFrom" class="border rounded-lg px-3 py-2">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Sampai Tanggal</label>
+        <input type="date" x-model="dateTo" class="border rounded-lg px-3 py-2">
+      </div>
+      <button @click="loadReport()" class="bg-blue-600 text-white px-4 py-2 rounded-lg">Tampilkan</button>
+      <button @click="downloadExcel()" class="bg-green-600 text-white px-4 py-2 rounded-lg">Download Excel</button>
+      <button @click="downloadPdf()" class="bg-red-600 text-white px-4 py-2 rounded-lg">Download PDF</button>
+    </div>
+
+    <div class="flex gap-4 mb-4">
+      <div class="bg-gray-50 rounded-lg p-3 flex-1">
+        <p class="text-xs text-gray-500">Total Omzet</p>
+        <p class="text-xl font-bold" x-text="formatRupiah(reportTotal)"></p>
+      </div>
+      <div class="bg-gray-50 rounded-lg p-3 flex-1">
+        <p class="text-xs text-gray-500">Jumlah Transaksi</p>
+        <p class="text-xl font-bold" x-text="reportRows.length"></p>
+      </div>
+    </div>
+
+    <table class="w-full text-sm">
+      <thead><tr class="text-left text-gray-500 border-b">
+        <th class="py-2">Tanggal</th><th>Kasir</th><th>Metode</th><th class="text-right">Total</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="t in reportRows" :key="t.id">
+          <tr class="border-b">
+            <td class="py-2" x-text="new Date(t.created_at).toLocaleString('id-ID')"></td>
+            <td x-text="t.cashier_name"></td>
+            <td x-text="t.payment_method"></td>
+            <td class="text-right" x-text="formatRupiah(t.total)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal Form Produk -->
+<div x-show="showProductForm" x-cloak class="fixed inset-0 bg-black/50 flex items-center justify-center z-20 p-4">
+  <div class="bg-white rounded-xl p-5 w-full max-w-sm">
+    <h3 class="font-bold text-lg mb-3" x-text="editingProduct.id ? 'Edit Produk' : 'Tambah Produk'"></h3>
+    <div class="space-y-3">
+      <input x-model="editingProduct.name" placeholder="Nama produk" class="w-full border rounded-lg px-3 py-2">
+      <input x-model="editingProduct.category" placeholder="Kategori" class="w-full border rounded-lg px-3 py-2">
+      <input x-model.number="editingProduct.price" type="number" placeholder="Harga jual" class="w-full border rounded-lg px-3 py-2">
+      <input x-model.number="editingProduct.stock" type="number" placeholder="Stok (kosongkan jika tidak dilacak)" class="w-full border rounded-lg px-3 py-2">
+      <input x-model="editingProduct.photo_url" placeholder="URL foto (opsional)" class="w-full border rounded-lg px-3 py-2">
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" x-model="editingProduct.is_active"> Aktif (tampil di kasir)
+      </label>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <button @click="showProductForm=false" class="flex-1 border py-2 rounded-lg">Batal</button>
+      <button @click="saveProduct()" class="flex-1 bg-blue-600 text-white py-2 rounded-lg font-semibold">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function adminApp() {
+  return {
+    tab: "menu",
+    products: [],
+    settings: {},
+    showProductForm: false,
+    editingProduct: {},
+    dateFrom: new Date().toISOString().slice(0,10),
+    dateTo: new Date().toISOString().slice(0,10),
+    reportRows: [],
+    formatRupiah,
+
+    async init() {
+      const auth = await requireLogin("admin");
+      if (!auth) return;
+      await this.loadProducts();
+      await this.loadSettings();
+      await this.loadReport();
+    },
+
+    async loadProducts() {
+      const { data } = await db.from("products").select("*").order("name");
+      this.products = data || [];
+    },
+    openProductForm(p) {
+      this.editingProduct = p ? { ...p } : { name: "", category: "", price: 0, stock: null, photo_url: "", is_active: true };
+      this.showProductForm = true;
+    },
+    async saveProduct() {
+      const p = this.editingProduct;
+      if (!p.name || !p.price) { alert("Nama dan harga wajib diisi"); return; }
+      if (p.id) await db.from("products").update(p).eq("id", p.id);
+      else await db.from("products").insert(p);
+      this.showProductForm = false;
+      await this.loadProducts();
+    },
+    async deleteProduct(id) {
+      if (!confirm("Hapus produk ini?")) return;
+      await db.from("products").delete().eq("id", id);
+      await this.loadProducts();
+    },
+
+    async loadSettings() {
+      const { data } = await db.from("store_settings").select("*").limit(1).single();
+      this.settings = data || {};
+    },
+    async saveSettings() {
+      if (this.settings.id) await db.from("store_settings").update(this.settings).eq("id", this.settings.id);
+      else {
+        const { data } = await db.from("store_settings").insert(this.settings).select().single();
+        this.settings = data;
+      }
+      alert("Pengaturan tersimpan.");
+    },
+
+    async loadReport() {
+      const from = this.dateFrom + "T00:00:00";
+      const to = this.dateTo + "T23:59:59";
+      const { data } = await db.from("transactions").select("*").gte("created_at", from).lte("created_at", to).order("created_at", { ascending: false });
+      this.reportRows = data || [];
+    },
+    get reportTotal() {
+      return this.reportRows.reduce((s, t) => s + Number(t.total || 0), 0);
+    },
+
+    downloadExcel() {
+      const rows = this.reportRows.map(t => ({
+        Tanggal: new Date(t.created_at).toLocaleString("id-ID"),
+        Kasir: t.cashier_name,
+        Metode: t.payment_method,
+        Total: t.total
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Laporan");
+      XLSX.writeFile(wb, `laporan-${this.dateFrom}_${this.dateTo}.xlsx`);
+    },
+    downloadPdf() {
+      const doc = new jspdf.jsPDF();
+      doc.text(`Laporan Penjualan (${this.dateFrom} s/d ${this.dateTo})`, 14, 15);
+      doc.autoTable({
+        startY: 20,
+        head: [["Tanggal", "Kasir", "Metode", "Total"]],
+        body: this.reportRows.map(t => [
+          new Date(t.created_at).toLocaleString("id-ID"),
+          t.cashier_name,
+          t.payment_method,
+          formatRupiah(t.total)
+        ])
+      });
+      doc.save(`laporan-${this.dateFrom}_${this.dateTo}.pdf`);
+    },
+
+    async logoutNow() { await logout(); }
+  }
+}
+</script>
+</body>
+</html>

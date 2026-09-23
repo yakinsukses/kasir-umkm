@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kasir - Kasir UMKM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen" x-data="kasirApp()" x-init="init()">
+
+<!-- Header -->
+<header class="bg-white shadow px-4 py-3 flex justify-between items-center sticky top-0 z-10">
+  <h1 class="font-bold text-lg">🛒 Kasir</h1>
+  <div class="flex items-center gap-3">
+    <span class="text-sm text-gray-500" x-text="userEmail"></span>
+    <button @click="logout()" class="text-sm text-red-600 hover:underline">Keluar</button>
+  </div>
+</header>
+
+<div class="flex flex-col md:flex-row gap-4 p-4">
+
+  <!-- Daftar Produk -->
+  <div class="flex-1">
+    <input type="text" x-model="search" placeholder="Cari nama produk..." class="w-full border rounded-lg px-3 py-2 mb-3">
+
+    <div class="flex gap-2 mb-3 overflow-x-auto">
+      <button @click="activeCategory = ''" :class="activeCategory==='' ? 'bg-blue-600 text-white' : 'bg-white border'" class="px-3 py-1 rounded-full text-sm whitespace-nowrap">Semua</button>
+      <template x-for="cat in categories" :key="cat">
+        <button @click="activeCategory = cat" :class="activeCategory===cat ? 'bg-blue-600 text-white' : 'bg-white border'" class="px-3 py-1 rounded-full text-sm whitespace-nowrap" x-text="cat"></button>
+      </template>
+    </div>
+
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+      <template x-for="p in filteredProducts" :key="p.id">
+        <button @click="addToCart(p)" class="bg-white rounded-xl shadow p-3 text-left hover:shadow-md transition">
+          <div class="h-20 bg-gray-100 rounded-lg mb-2 flex items-center justify-center overflow-hidden">
+            <img x-show="p.photo_url" :src="p.photo_url" class="h-full w-full object-cover">
+            <span x-show="!p.photo_url" class="text-gray-400 text-xs">Tanpa foto</span>
+          </div>
+          <p class="font-medium text-sm truncate" x-text="p.name"></p>
+          <p class="text-blue-600 font-semibold text-sm" x-text="formatRupiah(p.price)"></p>
+        </button>
+      </template>
+      <p x-show="filteredProducts.length === 0" class="text-gray-400 col-span-full text-center py-8">Produk tidak ditemukan.</p>
+    </div>
+  </div>
+
+  <!-- Keranjang -->
+  <div class="w-full md:w-96 bg-white rounded-xl shadow p-4 h-fit sticky top-20">
+    <h2 class="font-semibold mb-3">Keranjang</h2>
+    <div class="space-y-2 max-h-64 overflow-y-auto mb-3">
+      <template x-for="(item, idx) in cart" :key="item.id">
+        <div class="flex items-center justify-between text-sm border-b pb-2">
+          <div class="flex-1">
+            <p class="font-medium" x-text="item.name"></p>
+            <p class="text-gray-500" x-text="formatRupiah(item.price) + ' x ' + item.qty"></p>
+          </div>
+          <div class="flex items-center gap-1">
+            <button @click="changeQty(idx, -1)" class="w-6 h-6 bg-gray-200 rounded">-</button>
+            <span x-text="item.qty" class="w-5 text-center"></span>
+            <button @click="changeQty(idx, 1)" class="w-6 h-6 bg-gray-200 rounded">+</button>
+          </div>
+        </div>
+      </template>
+      <p x-show="cart.length === 0" class="text-gray-400 text-center py-4">Keranjang kosong</p>
+    </div>
+
+    <div class="border-t pt-3 space-y-1 text-sm mb-3">
+      <div class="flex justify-between font-bold text-base">
+        <span>Total</span>
+        <span x-text="formatRupiah(total)"></span>
+      </div>
+    </div>
+
+    <button @click="openCheckout()" :disabled="cart.length===0" class="w-full bg-green-600 disabled:bg-gray-300 text-white font-semibold py-2 rounded-lg">Bayar</button>
+  </div>
+</div>
+
+<!-- Modal Checkout -->
+<div x-show="showCheckout" x-cloak class="fixed inset-0 bg-black/50 flex items-center justify-center z-20 p-4">
+  <div class="bg-white rounded-xl p-5 w-full max-w-sm">
+    <h3 class="font-bold text-lg mb-3">Pembayaran</h3>
+    <p class="text-2xl font-bold mb-4" x-text="formatRupiah(total)"></p>
+
+    <div class="flex gap-2 mb-3">
+      <button @click="paymentMethod='Tunai'" :class="paymentMethod==='Tunai' ? 'bg-blue-600 text-white' : 'bg-gray-100'" class="flex-1 py-2 rounded-lg text-sm font-medium">Tunai</button>
+      <button @click="paymentMethod='QRIS'" :class="paymentMethod==='QRIS' ? 'bg-blue-600 text-white' : 'bg-gray-100'" class="flex-1 py-2 rounded-lg text-sm font-medium">QRIS</button>
+    </div>
+
+    <div x-show="paymentMethod==='Tunai'" class="mb-3">
+      <label class="block text-sm font-medium mb-1">Uang Diterima</label>
+      <input type="number" x-model.number="cashReceived" class="w-full border rounded-lg px-3 py-2">
+      <p class="text-sm mt-1" x-show="cashReceived >= total">Kembalian: <span class="font-semibold" x-text="formatRupiah(cashReceived - total)"></span></p>
+    </div>
+
+    <div x-show="paymentMethod==='QRIS'" class="mb-3 text-center text-sm text-gray-500">
+      Tunjukkan QRIS toko ke pelanggan, lalu klik konfirmasi setelah pembayaran diterima.
+    </div>
+
+    <div class="flex gap-2">
+      <button @click="showCheckout=false" class="flex-1 border py-2 rounded-lg">Batal</button>
+      <button @click="confirmPayment()" :disabled="paymentMethod==='Tunai' && cashReceived < total" class="flex-1 bg-green-600 disabled:bg-gray-300 text-white py-2 rounded-lg font-semibold">Konfirmasi</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function kasirApp() {
+  return {
+    products: [],
+    cart: [],
+    search: "",
+    activeCategory: "",
+    showCheckout: false,
+    paymentMethod: "Tunai",
+    cashReceived: 0,
+    userEmail: "",
+    formatRupiah,
+
+    async init() {
+      const auth = await requireLogin();
+      if (!auth) return;
+      this.userEmail = auth.user.email;
+      const { data } = await db.from("products").select("*").eq("is_active", true).order("name");
+      this.products = data || [];
+    },
+
+    get categories() {
+      return [...new Set(this.products.map(p => p.category).filter(Boolean))];
+    },
+    get filteredProducts() {
+      return this.products.filter(p =>
+        (!this.activeCategory || p.category === this.activeCategory) &&
+        p.name.toLowerCase().includes(this.search.toLowerCase())
+      );
+    },
+    get total() {
+      return this.cart.reduce((s, i) => s + i.price * i.qty, 0);
+    },
+
+    addToCart(p) {
+      const existing = this.cart.find(i => i.id === p.id);
+      if (existing) existing.qty++;
+      else this.cart.push({ id: p.id, name: p.name, price: p.price, qty: 1 });
+    },
+    changeQty(idx, delta) {
+      this.cart[idx].qty += delta;
+      if (this.cart[idx].qty <= 0) this.cart.splice(idx, 1);
+    },
+
+    openCheckout() {
+      this.cashReceived = 0;
+      this.paymentMethod = "Tunai";
+      this.showCheckout = true;
+    },
+
+    async confirmPayment() {
+      const { data: { session } } = await db.auth.getSession();
+      const change = this.paymentMethod === "Tunai" ? this.cashReceived - this.total : 0;
+
+      const { data: trx, error } = await db.from("transactions").insert({
+        cashier_name: session.user.email,
+        subtotal: this.total,
+        total: this.total,
+        payment_method: this.paymentMethod,
+        cash_received: this.paymentMethod === "Tunai" ? this.cashReceived : this.total,
+        change: change
+      }).select().single();
+
+      if (error) { alert("Gagal menyimpan transaksi: " + error.message); return; }
+
+      const items = this.cart.map(i => ({
+        transaction_id: trx.id,
+        product_id: i.id,
+        qty: i.qty,
+        price_at_transaction: i.price
+      }));
+      await db.from("transaction_items").insert(items);
+
+      // kurangi stok jika produk melacak stok
+      for (const i of this.cart) {
+        const p = this.products.find(pr => pr.id === i.id);
+        if (p && p.stock !== null && p.stock !== undefined) {
+          await db.from("products").update({ stock: Math.max(0, p.stock - i.qty) }).eq("id", i.id);
+        }
+      }
+
+      this.showCheckout = false;
+      this.cart = [];
+      window.open("struk.html?id=" + trx.id, "_blank");
+      await this.init();
+    },
+
+    async logout() { await logout(); }
+  }
+}
+</script>
+</body>
+</html>

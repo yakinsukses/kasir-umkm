@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login - Kasir UMKM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+<div class="bg-white shadow-lg rounded-2xl p-8 w-full max-w-sm">
+  <h1 class="text-2xl font-bold text-center mb-1">Kasir UMKM</h1>
+  <p class="text-center text-gray-500 mb-6 text-sm">Masuk untuk mulai berjualan</p>
+  <form id="loginForm" class="space-y-4">
+    <div>
+      <label class="block text-sm font-medium mb-1">Email</label>
+      <input type="email" id="email" required class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1">Password</label>
+      <input type="password" id="password" required class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+    </div>
+    <p id="errMsg" class="text-red-500 text-sm hidden"></p>
+    <button type="submit" class="w-full bg-blue-600 text-white font-semibold py-2 rounded-lg hover:bg-blue-700">Masuk</button>
+  </form>
+</div>
+
+<script>
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+  const errMsg = document.getElementById("errMsg");
+  errMsg.classList.add("hidden");
+
+  const { data, error } = await db.auth.signInWithPassword({ email, password });
+  if (error) {
+    errMsg.textContent = "Login gagal: " + error.message;
+    errMsg.classList.remove("hidden");
+    return;
+  }
+
+  const { data: profile } = await db
+    .from("users_profile")
+    .select("role")
+    .eq("id", data.user.id)
+    .single();
+
+  if (!profile) {
+    errMsg.textContent = "Akun belum punya role. Hubungi admin toko.";
+    errMsg.classList.remove("hidden");
+    return;
+  }
+
+  window.location.href = profile.role === "admin" ? "admin.html" : "kasir.html";
+});
+
+// kalau sudah login, langsung redirect
+(async () => {
+  const { data: { session } } = await db.auth.getSession();
+  if (session) {
+    const { data: profile } = await db.from("users_profile").select("role").eq("id", session.user.id).single();
+    if (profile) window.location.href = profile.role === "admin" ? "admin.html" : "kasir.html";
+  }
+})();
+</script>
+</body>
+</html>
