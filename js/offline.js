@@ -129,12 +129,17 @@ function normalizeEmail(value) {
 }
 window.normalizeEmail = normalizeEmail;
 
-function uploadImage(file, folder) {
-  const path = `${folder}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
-  return db.storage.from("kasir-images").upload(path, file, { upsert: false }).then(({ data, error }) => {
-    if (error) throw error;
-    return db.storage.from("kasir-images").getPublicUrl(data.path).data.publicUrl;
-  });
+async function uploadImage(file, folder) {
+  if (!file || !file.type.startsWith("image/")) throw new Error("File harus berupa gambar.");
+  if (file.size > 5 * 1024 * 1024) throw new Error("Ukuran gambar maksimal 5 MB.");
+  const { data: { user } } = await db.auth.getUser();
+  if (!user) throw new Error("Sesi login tidak ditemukan. Silakan login ulang.");
+  const path = `${folder}/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
+  const { data, error } = await db.storage.from("kasir-images").upload(path, file, { upsert: true, contentType: file.type, cacheControl: "3600" });
+  if (error) throw error;
+  const { data: publicData } = db.storage.from("kasir-images").getPublicUrl(data.path);
+  if (!publicData?.publicUrl) throw new Error("URL foto tidak tersedia.");
+  return publicData.publicUrl;
 }
 window.uploadImage = uploadImage;
 

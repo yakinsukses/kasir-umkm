@@ -175,8 +175,9 @@
 function adminApp() {
   return {
     tab: "menu",
-    products: [],
-    settings: {},
+  products: [],
+  categoryOptions: [],
+  settings: {},
     showProductForm: false,
     editingProduct: {},
     dateFrom: new Date().toISOString().slice(0,10),
@@ -188,6 +189,7 @@ function adminApp() {
       const auth = await requireLogin("admin");
       if (!auth) return;
       await this.loadProducts();
+      await this.loadCategories();
       await this.loadSettings();
       await this.loadReport();
     },
@@ -197,19 +199,26 @@ function adminApp() {
       this.products = data || await offlineGetAll("products");
       if (data) await cacheData("products", data);
     },
+    async loadCategories() {
+      const { data } = navigator.onLine ? await db.from("product_categories").select("name").order("name") : { data: null };
+      this.categoryOptions = data?.map((item) => item.name) || [...new Set(this.products.map((product) => product.category).filter(Boolean))].sort();
+    },
     openProductForm(p) {
       this.editingProduct = p ? { ...p } : { name: "", category: "", price: 0, stock: null, photo_url: "", is_active: true };
       this.showProductForm = true;
     },
     async saveProduct() {
-      const p = { ...this.editingProduct, id: this.editingProduct.id || crypto.randomUUID() };
+      const isExisting = Boolean(this.editingProduct.id);
+      const p = { ...this.editingProduct };
+      if (!isExisting) delete p.id;
       p.price = parseRupiah(p.price);
       if (!p.name || !p.price) { alert("Nama dan harga wajib diisi"); return; }
       if (navigator.onLine) {
-        const response = p.id
+        const response = isExisting
           ? await db.from("products").update(p).eq("id", p.id)
-          : await db.from("products").insert(p);
+          : await db.from("products").insert(p).select().single();
         if (response.error) { alert("Produk gagal disimpan: " + response.error.message); return; }
+        if (!isExisting && response.data) Object.assign(p, response.data);
       } else {
         await queueOfflineAction({ type: "product", product: p });
       }
@@ -251,11 +260,16 @@ function adminApp() {
       this.reportRows = data || [];
     },
     get categories() {
-      return [...new Set(this.products.map((product) => product.category).filter(Boolean))].sort();
+      return this.categoryOptions?.length ? this.categoryOptions : [...new Set(this.products.map((product) => product.category).filter(Boolean))].sort();
     },
-    addCategory() {
+    async addCategory() {
       const category = prompt("Nama kategori baru:")?.trim();
       if (!category) return;
+      if (navigator.onLine) {
+        const { error } = await db.from("product_categories").upsert({ name: category }, { onConflict: "name" });
+        if (error) { alert("Kategori gagal disimpan: " + error.message); return; }
+      }
+      this.categoryOptions = [...new Set([...(this.categoryOptions || []), category])].sort();
       this.editingProduct.category = category;
     },
     async removeCategory() {
