@@ -65,12 +65,20 @@ async function syncOfflineQueue() {
       if (action.type === "transaction") {
         const { data: trx, error } = await db.from("transactions").insert(action.transaction).select().single();
         if (error) throw error;
-        await db.from("transaction_items").insert(action.items.map((item) => ({ ...item, transaction_id: trx.id })));
+        const { error: itemsError } = await db.from("transaction_items").upsert(action.items.map((item) => ({ ...item, transaction_id: trx.id })));
+        if (itemsError) throw itemsError;
       }
       if (action.type === "product") {
         const request = action.product.id
-          ? db.from("products").update(action.product).eq("id", action.product.id)
+          ? db.from("products").upsert(action.product)
           : db.from("products").insert(action.product);
+        const { error } = await request;
+        if (error) throw error;
+      }
+      if (action.type === "settings") {
+        const request = action.settings.id
+          ? db.from("store_settings").upsert(action.settings)
+          : db.from("store_settings").insert(action.settings);
         const { error } = await request;
         if (error) throw error;
       }

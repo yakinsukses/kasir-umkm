@@ -86,8 +86,10 @@ function strukApp() {
       const sourceItems = items || offlineItems?.items || [];
       this.items = sourceItems.map(i => ({ ...i, name: i.products?.name || this.items.find((old) => old.id === i.product_id)?.name || "Produk" }));
 
-      const { data: settings } = await db.from("store_settings").select("*").limit(1).single();
-      this.settings = settings || {};
+      const { data: settings } = navigator.onLine
+        ? await db.from("store_settings").select("*").limit(1).maybeSingle()
+        : { data: null };
+      this.settings = settings || (await offlineGetAll("settings"))[0] || {};
     }
   }
 }
