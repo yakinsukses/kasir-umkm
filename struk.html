@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/config.js"></script>
 <script src="js/auth.js"></script>
+<script src="js/offline.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
   @media print {
@@ -30,7 +31,6 @@
   </div>
   <div class="border-t border-dashed my-2"></div>
   <p x-text="tanggal"></p>
-  <p x-text="'Kasir: ' + (trx.cashier_name || '-')"></p>
   <div class="border-t border-dashed my-2"></div>
 
   <template x-for="item in items" :key="item.id">
@@ -77,18 +77,19 @@ function strukApp() {
       const id = new URLSearchParams(window.location.search).get("id");
       if (!id) return;
 
-      const { data: trx } = await db.from("transactions").select("*").eq("id", id).single();
-      this.trx = trx || {};
-      this.tanggal = trx ? new Date(trx.created_at).toLocaleString("id-ID") : "";
+      const { data: trx } = navigator.onLine ? await db.from("transactions").select("*").eq("id", id).single() : { data: null };
+      this.trx = trx || (await offlineGetAll("transactions")).find((item) => item.id === id) || {};
+      this.tanggal = this.trx.created_at ? new Date(this.trx.created_at).toLocaleString("id-ID") : "";
 
-      const { data: items } = await db
-        .from("transaction_items")
-        .select("*, products(name)")
-        .eq("transaction_id", id);
-      this.items = (items || []).map(i => ({ ...i, name: i.products?.name || "Produk" }));
+      const { data: items } = navigator.onLine ? await db.from("transaction_items").select("*, products(name)").eq("transaction_id", id) : { data: null };
+      const offlineItems = (await offlineGetAll("transaction_items")).find((item) => item.transaction_id === id);
+      const sourceItems = items || offlineItems?.items || [];
+      this.items = sourceItems.map(i => ({ ...i, name: i.products?.name || this.items.find((old) => old.id === i.product_id)?.name || "Produk" }));
 
-      const { data: settings } = await db.from("store_settings").select("*").limit(1).single();
-      this.settings = settings || {};
+      const { data: settings } = navigator.onLine
+        ? await db.from("store_settings").select("*").limit(1).maybeSingle()
+        : { data: null };
+      this.settings = settings || (await offlineGetAll("settings"))[0] || {};
     }
   }
 }
