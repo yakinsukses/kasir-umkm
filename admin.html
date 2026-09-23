@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/config.js"></script>
 <script src="js/auth.js"></script>
+<script src="js/offline.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
@@ -78,8 +79,9 @@
         <input x-model="settings.phone" class="w-full border rounded-lg px-3 py-2">
       </div>
       <div>
-        <label class="block text-sm font-medium mb-1">URL Logo (opsional)</label>
-        <input x-model="settings.logo_url" placeholder="https://..." class="w-full border rounded-lg px-3 py-2">
+        <label class="block text-sm font-medium mb-1">Logo toko</label>
+        <input type="file" accept="image/*" @change="uploadLogo($event)" class="w-full border rounded-lg px-3 py-2">
+        <img x-show="settings.logo_url" :src="settings.logo_url" class="mt-2 h-16 object-contain">
       </div>
       <div>
         <label class="block text-sm font-medium mb-1">Header Struk</label>
@@ -145,10 +147,19 @@
     <h3 class="font-bold text-lg mb-3" x-text="editingProduct.id ? 'Edit Produk' : 'Tambah Produk'"></h3>
     <div class="space-y-3">
       <input x-model="editingProduct.name" placeholder="Nama produk" class="w-full border rounded-lg px-3 py-2">
-      <input x-model="editingProduct.category" placeholder="Kategori" class="w-full border rounded-lg px-3 py-2">
-      <input x-model.number="editingProduct.price" type="number" placeholder="Harga jual" class="w-full border rounded-lg px-3 py-2">
+      <div class="flex gap-2">
+        <select x-model="editingProduct.category" class="flex-1 border rounded-lg px-3 py-2">
+          <option value="">Pilih kategori</option>
+          <template x-for="cat in categories" :key="cat"><option :value="cat" x-text="cat"></option></template>
+        </select>
+        <button type="button" @click="addCategory()" class="border rounded-lg px-3" title="Tambah kategori">+</button>
+        <button type="button" @click="removeCategory()" :disabled="!editingProduct.category" class="border rounded-lg px-3 text-red-600" title="Hapus kategori">−</button>
+      </div>
+      <input type="text" inputmode="numeric" :value="formatInputRupiah(editingProduct.price)" @input="editingProduct.price = parseRupiah($event.target.value)" placeholder="Harga jual (contoh 30.000)" class="w-full border rounded-lg px-3 py-2">
       <input x-model.number="editingProduct.stock" type="number" placeholder="Stok (kosongkan jika tidak dilacak)" class="w-full border rounded-lg px-3 py-2">
-      <input x-model="editingProduct.photo_url" placeholder="URL foto (opsional)" class="w-full border rounded-lg px-3 py-2">
+      <input type="file" accept="image/*" @change="uploadProductPhoto($event)" class="w-full border rounded-lg px-3 py-2">
+      <img x-show="editingProduct.photo_url" :src="editingProduct.photo_url" class="h-20 w-full rounded-lg object-cover">
+      <p class="text-xs text-gray-500">Foto akan diunggah ke Supabase Storage.</p>
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" x-model="editingProduct.is_active"> Aktif (tampil di kasir)
       </label>
@@ -182,8 +193,9 @@ function adminApp() {
     },
 
     async loadProducts() {
-      const { data } = await db.from("products").select("*").order("name");
-      this.products = data || [];
+      const { data } = navigator.onLine ? await db.from("products").select("*").order("name") : { data: null };
+      this.products = data || await offlineGetAll("products");
+      if (data) await cacheData("products", data);
     },
     openProductForm(p) {
       this.editingProduct = p ? { ...p } : { name: "", category: "", price: 0, stock: null, photo_url: "", is_active: true };
@@ -191,9 +203,11 @@ function adminApp() {
     },
     async saveProduct() {
       const p = this.editingProduct;
+      p.price = parseRupiah(p.price);
       if (!p.name || !p.price) { alert("Nama dan harga wajib diisi"); return; }
       if (p.id) await db.from("products").update(p).eq("id", p.id);
       else await db.from("products").insert(p);
+      await offlinePut("products", p);
       this.showProductForm = false;
       await this.loadProducts();
     },
@@ -205,7 +219,8 @@ function adminApp() {
 
     async loadSettings() {
       const { data } = await db.from("store_settings").select("*").limit(1).single();
-      this.settings = data || {};
+      this.settings = data || (await offlineGetAll("settings"))[0] || {};
+      if (data) await offlinePut("settings", data);
     },
     async saveSettings() {
       if (this.settings.id) await db.from("store_settings").update(this.settings).eq("id", this.settings.id);
@@ -221,6 +236,34 @@ function adminApp() {
       const to = this.dateTo + "T23:59:59";
       const { data } = await db.from("transactions").select("*").gte("created_at", from).lte("created_at", to).order("created_at", { ascending: false });
       this.reportRows = data || [];
+    },
+    get categories() {
+      return [...new Set(this.products.map((product) => product.category).filter(Boolean))].sort();
+    },
+    addCategory() {
+      const category = prompt("Nama kategori baru:")?.trim();
+      if (!category) return;
+      this.editingProduct.category = category;
+    },
+    async removeCategory() {
+      const category = this.editingProduct.category;
+      if (!category || !confirm(`Hapus kategori ${category}? Produk yang ada tetap tersimpan.`)) return;
+      const products = this.products.filter((product) => product.category === category);
+      for (const product of products) await db.from("products").update({ category: null }).eq("id", product.id);
+      this.editingProduct.category = "";
+      await this.loadProducts();
+    },
+    async uploadProductPhoto(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try { this.editingProduct.photo_url = await uploadImage(file, "products"); }
+      catch (error) { alert("Upload foto gagal. Pastikan bucket kasir-images tersedia."); console.warn("[v0] Upload produk:", error.message); }
+    },
+    async uploadLogo(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try { this.settings.logo_url = await uploadImage(file, "logos"); }
+      catch (error) { alert("Upload logo gagal. Pastikan bucket kasir-images tersedia."); console.warn("[v0] Upload logo:", error.message); }
     },
     get reportTotal() {
       return this.reportRows.reduce((s, t) => s + Number(t.total || 0), 0);

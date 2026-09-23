@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/config.js"></script>
 <script src="js/auth.js"></script>
+<script src="js/offline.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen" x-data="kasirApp()" x-init="init()">
@@ -93,7 +94,12 @@
 
     <div x-show="paymentMethod==='Tunai'" class="mb-3">
       <label class="block text-sm font-medium mb-1">Uang Diterima</label>
-      <input type="number" x-model.number="cashReceived" class="w-full border rounded-lg px-3 py-2">
+      <div class="grid grid-cols-3 gap-2 mb-2">
+        <template x-for="amount in cashDenominations" :key="amount">
+          <button type="button" @click="cashReceived += amount" class="border rounded-lg py-2 text-xs hover:bg-blue-50" x-text="formatInputRupiah(amount)"></button>
+        </template>
+      </div>
+      <input type="text" inputmode="numeric" :value="formatInputRupiah(cashReceived)" @input="cashReceived = parseRupiah($event.target.value)" class="w-full border rounded-lg px-3 py-2">
       <p class="text-sm mt-1" x-show="cashReceived >= total">Kembalian: <span class="font-semibold" x-text="formatRupiah(cashReceived - total)"></span></p>
     </div>
 
@@ -118,6 +124,7 @@ function kasirApp() {
     showCheckout: false,
     paymentMethod: "Tunai",
     cashReceived: 0,
+    cashDenominations: [5000, 10000, 15000, 20000, 50000, 100000],
     userEmail: "",
     formatRupiah,
 
@@ -125,8 +132,10 @@ function kasirApp() {
       const auth = await requireLogin();
       if (!auth) return;
       this.userEmail = auth.user.email;
-      const { data } = await db.from("products").select("*").eq("is_active", true).order("name");
-      this.products = data || [];
+      const { data, error } = navigator.onLine ? await db.from("products").select("*").eq("is_active", true).order("name") : { data: null, error: true };
+      this.products = data || await offlineGetAll("products");
+      if (data) await cacheData("products", data);
+      if (error && !this.products.length) this.products = await offlineGetAll("products");
     },
 
     get categories() {
@@ -162,16 +171,22 @@ function kasirApp() {
       const { data: { session } } = await db.auth.getSession();
       const change = this.paymentMethod === "Tunai" ? this.cashReceived - this.total : 0;
 
-      const { data: trx, error } = await db.from("transactions").insert({
-        cashier_name: session.user.email,
+      const transaction = {
+        id: crypto.randomUUID(),
+        cashier_name: session?.user?.email || "offline",
         subtotal: this.total,
         total: this.total,
         payment_method: this.paymentMethod,
         cash_received: this.paymentMethod === "Tunai" ? this.cashReceived : this.total,
-        change: change
-      }).select().single();
-
-      if (error) { alert("Gagal menyimpan transaksi: " + error.message); return; }
+        change,
+        created_at: new Date().toISOString()
+      };
+      let trx = transaction;
+      if (navigator.onLine) {
+        const response = await db.from("transactions").insert(transaction).select().single();
+        if (response.error) { alert("Gagal menyimpan transaksi: " + response.error.message); return; }
+        trx = response.data;
+      }
 
       const items = this.cart.map(i => ({
         transaction_id: trx.id,
@@ -179,7 +194,11 @@ function kasirApp() {
         qty: i.qty,
         price_at_transaction: i.price
       }));
-      await db.from("transaction_items").insert(items);
+      await offlinePut("transactions", trx);
+      if (!navigator.onLine) await queueOfflineAction({ type: "transaction", transaction, items });
+
+      await offlinePut("transaction_items", { id: trx.id, transaction_id: trx.id, items });
+      if (navigator.onLine) await db.from("transaction_items").insert(items);
 
       // kurangi stok jika produk melacak stok
       for (const i of this.cart) {
